@@ -15,6 +15,11 @@ const (
 )
 
 /*
+| type | nkeys | pointers | offsets | key-values   |
+|  1   |   2   | 101      |  6 12   | 2 0 "k1"     |
+
+assuming the bekow node is stored at 101
+
 | type | nkeys | pointers | offsets    |            key-values           | unused |
 |   2  |   2   | nil nil  |  8 19      | 2 2 "k1" "hi"  2 5 "k3" "hello" |        |
 |  2B  |  2B   |   2×8B   |  2×2Bx2B   | 4B + 2B + 2B + 4B + 2B + 5B     |        |
@@ -255,4 +260,14 @@ func nodeSplit3(old BNode) (uint16, [3]BNode) {
 	}
 
 	return 3, [3]BNode{leftleft, middle, right}
+}
+
+func nodeReplaceChildren(tree *BTree, new, old BNode, idx uint16, children ...BNode) {
+	inc := uint16(len(children))
+	new.setHeader(BNODE_NODE, old.nkeys()+inc-1)
+	nodeAppendRange(new, old, 0, 0, idx)
+	for i, node := range children {
+		nodeAppendKV(new, idx+uint16(i), tree.new(node), node.getKey(0), nil)
+	}
+	nodeAppendRange(new, old, idx+inc, idx+1, old.nkeys()-(idx+1))
 }
