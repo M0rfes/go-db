@@ -16,7 +16,7 @@ const (
 
 /*
 | type | nkeys | pointers | offsets | key-values   |
-|  1   |   2   | 101      |  6 12   | 2 0 "k1"     |
+|  1   |   2   | 101      |  6      | 2 0 "k1"     |
 
 assuming the bekow node is stored at 101
 
@@ -180,6 +180,13 @@ func leafUpdate(new, old BNode, idx uint16, key, val []byte) {
 	nodeAppendRange(new, old, idx+1, idx+1, old.nkeys()-(idx+1))
 }
 
+func leafDelete(new, old BNode, idx uint16) {
+	new.setHeader(BNODE_LEAF, old.nkeys()-1)
+	nodeAppendRange(new, old, 0, 0, idx)
+	nodeAppendRange(new, old, idx, idx+1, old.nkeys()-(idx+1))
+
+}
+
 func nodeLookupLE(node BNode, key []byte) uint16 {
 	nkeys := node.nkeys()
 	var i uint16
@@ -264,10 +271,23 @@ func nodeSplit3(old BNode) (uint16, [3]BNode) {
 
 func nodeReplaceChildren(tree *BTree, new, old BNode, idx uint16, children ...BNode) {
 	inc := uint16(len(children))
-	new.setHeader(BNODE_NODE, old.nkeys()+inc-1)
+	new.setHeader(BNODE_NODE, old.nkeys()+inc-1) // -1 cause its 0 indexed
 	nodeAppendRange(new, old, 0, 0, idx)
 	for i, node := range children {
-		nodeAppendKV(new, idx+uint16(i), tree.new(node), node.getKey(0), nil)
+		nodeAppendKV(new, idx+uint16(i), tree.new(node), node.getKey(0), nil) // val is nil cause its an internal node and we only keep the primaery key of child node
 	}
 	nodeAppendRange(new, old, idx+inc, idx+1, old.nkeys()-(idx+1))
+}
+
+func nodeMerge(new, left, right BNode) {
+	new.setHeader(right.btype(), right.nkeys()+left.nkeys())
+	nodeAppendRange(new, left, 0, 0, left.nkeys())
+	nodeAppendRange(new, right, 0, left.nkeys(), right.nkeys())
+}
+
+func nodeReplace2Kid(new, old BNode, idx uint16, ptr uint64, key []byte) {
+	new.setHeader(old.btype(), old.nkeys()-1)
+	nodeAppendRange(new, old, 0, 0, idx)
+	nodeAppendKV(new, idx, ptr, key, nil)
+	nodeAppendRange(new, old, idx+1, idx+2, old.nkeys()-(idx+2))
 }
