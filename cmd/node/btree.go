@@ -8,9 +8,9 @@ import (
 
 type BTree struct {
 	root uint64
-	get  func(uint64) []byte
-	new  func([]byte) uint64
-	del  func(uint64)
+	get  func(uint64) ([]byte, error)
+	new  func([]byte) (uint64, error)
+	del  func(uint64) error
 }
 
 func treeInsert(tree *BTree, node BNode, key, val []byte) BNode {
@@ -19,7 +19,11 @@ func treeInsert(tree *BTree, node BNode, key, val []byte) BNode {
 	switch node.btype() {
 	case BNODE_NODE:
 		children := node.getPtr(idx)
-		knode := treeInsert(tree, tree.get(children), key, val)
+		childNode, err := tree.get(children)
+		if err != nil {
+			log.Fatalf("child with id = %d node not found\n", children)
+		}
+		knode := treeInsert(tree, childNode, key, val)
 		slipts, nodes := nodeSplit3(knode)
 		tree.del(children) // CoW
 		nodeReplaceChildren(tree, new, node, idx, nodes[:slipts]...)
@@ -47,10 +51,18 @@ func (tree *BTree) Insert(key []byte, val []byte) error {
 		root.setHeader(BNODE_LEAF, 2)
 		nodeAppendKV(root, 0, 0, nil, nil)
 		nodeAppendKV(root, 1, 0, key, val)
-		tree.root = tree.new(root)
+		var err error
+		tree.root, err = tree.new(root)
+		if err != nil {
+			log.Fatalf("making root failed\n")
+		}
 		return nil
 	}
-	node := treeInsert(tree, tree.get(tree.root), key, val)
+	root, err := tree.get(tree.root)
+	if err != nil {
+		log.Fatalf("getting root with id = %d failed\n", tree.root)
+	}
+	node := treeInsert(tree, root, key, val)
 	splits, nodes := nodeSplit3(node)
 	tree.del(tree.root)
 
@@ -58,12 +70,23 @@ func (tree *BTree) Insert(key []byte, val []byte) error {
 		root := BNode(make([]byte, BTREE_PAGE_SIZE))
 		root.setHeader(BNODE_NODE, splits)
 		for i, node := range nodes[:splits] {
-			ptr, key := tree.new(node), node.getKey(0)
+			ptr, err := tree.new(node)
+			if err != nil {
+				log.Fatalf("faile to make new node\n")
+			}
+			key := node.getKey(0)
+
 			nodeAppendKV(root, uint16(i), ptr, key, nil)
 		}
-		tree.root = tree.new(root)
+		tree.root, err = tree.new(root)
+		if err != nil {
+			log.Fatalf("failed to create new root with id = %d\n", root)
+		}
 	} else {
-		tree.root = tree.new(nodes[0])
+		tree.root, err = tree.new(nodes[0])
+		if err != nil {
+			log.Fatalf("failed to create new root")
+		}
 	}
 	return nil
 }
@@ -74,7 +97,11 @@ func shouldMeger(tree *BTree, node BNode, idx uint16, update BNode) (int16, BNod
 	}
 
 	if idx > 0 {
-		sibling := BNode(tree.get(node.getPtr(idx - 1)))
+		bytes, err := tree.get(node.getPtr(idx - 1))
+		if err != nil {
+			log.Fatalf("cant find sibling\n")
+		}
+		sibling := BNode(bytes)
 		merged := sibling.nbytes() - update.nbytes() - HEADER_BYTES
 		if merged <= BTREE_PAGE_SIZE {
 			return -1, sibling
@@ -82,7 +109,11 @@ func shouldMeger(tree *BTree, node BNode, idx uint16, update BNode) (int16, BNod
 	}
 
 	if idx+1 < node.nkeys() {
-		sibling := BNode(tree.get(node.getPtr(idx + 1)))
+		bytes, err := tree.get(node.getPtr(idx + 1))
+		if err != nil {
+			log.Fatalf("cant find sibling\n")
+		}
+		sibling := BNode(bytes)
 		merged := sibling.nbytes() - update.nbytes() - HEADER_BYTES
 		if merged <= BTREE_PAGE_SIZE {
 			return 1, sibling
@@ -111,7 +142,11 @@ func treeDelete(tree *BTree, node BNode, key []byte) BNode {
 func nodeDelete(tree *BTree, node BNode, idx uint16, key []byte) BNode {
 	// recurse into the kid
 	kptr := node.getPtr(idx)
-	updated := treeDelete(tree, tree.get(kptr), key)
+	newNode, err := tree.get(kptr)
+	if err != nil {
+		log.Fatalf("cant find node with ptr = %d\n", kptr)
+	}
+	updated := treeDelete(tree, newNode, key)
 	if len(updated) == 0 {
 		return BNode{} // not found
 	}
@@ -124,12 +159,20 @@ func nodeDelete(tree *BTree, node BNode, idx uint16, key []byte) BNode {
 		merged := BNode(make([]byte, BTREE_PAGE_SIZE))
 		nodeMerge(merged, sibling, updated)
 		tree.del(node.getPtr(idx - 1))
-		nodeReplace2Kid(new, node, idx-1, tree.new(merged), merged.getKey(0))
+		newNode, err := tree.new(merged)
+		if err != nil {
+			log.Fatalf("can't merge the nodes\n")
+		}
+		nodeReplace2Kid(new, node, idx-1, newNode, merged.getKey(0))
 	case mergeDir > 0: // right
 		merged := BNode(make([]byte, BTREE_PAGE_SIZE))
 		nodeMerge(merged, updated, sibling)
 		tree.del(node.getPtr(idx + 1))
-		nodeReplace2Kid(new, node, idx, tree.new(merged), merged.getKey(0))
+		newNode, err := tree.new(merged)
+		if err != nil {
+			log.Fatalf("can't merge the nodes\n")
+		}
+		nodeReplace2Kid(new, node, idx, newNode, merged.getKey(0))
 	case mergeDir == 0 && updated.nkeys() == 0:
 		if node.nkeys() != 1 && idx != 0 {
 			// 1 empty child but no sibling
