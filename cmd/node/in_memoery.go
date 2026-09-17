@@ -46,3 +46,8 @@ func New() *inMemory {
 		pages: pages,
 	}
 }
+
+func (inMemory *inMemory) Add(key, val string) {
+	inMemory.tree.Insert([]byte(key), []byte(val))
+	inMemory.ref[key] = val
+}

@@ -13,34 +13,6 @@ type BTree struct {
 	del  func(uint64) error
 }
 
-func treeInsert(tree *BTree, node BNode, key, val []byte) BNode {
-	new := BNode(make([]byte, 2*BTREE_PAGE_SIZE)) // CoW
-	idx := nodeLookupLE(node, key)
-	switch node.btype() {
-	case BNODE_NODE:
-		children := node.getPtr(idx)
-		childNode, err := tree.get(children)
-		if err != nil {
-			log.Fatalf("child with id = %d node not found\n", children)
-		}
-		knode := treeInsert(tree, childNode, key, val)
-		slipts, nodes := nodeSplit3(knode)
-		tree.del(children) // CoW
-		nodeReplaceChildren(tree, new, node, idx, nodes[:slipts]...)
-
-	case BNODE_LEAF:
-		if bytes.Equal(key, node.getKey(idx)) {
-			leafUpdate(new, node, idx, key, val)
-		} else {
-			leafInsert(new, node, idx+1, key, val)
-		}
-	default:
-		log.Fatalf("unknown node type %d=\n", node.btype())
-	}
-
-	return new
-}
-
 func (tree *BTree) Insert(key []byte, val []byte) error {
 	if len(key) > BTREE_MAX_KEY_SIZE || len(val) > BTREE_MAX_VAL_SIZE {
 		return errors.New("key or val too big")
@@ -89,6 +61,106 @@ func (tree *BTree) Insert(key []byte, val []byte) error {
 		}
 	}
 	return nil
+}
+
+func (tree *BTree) Get(key []byte) ([]byte, bool) {
+	if tree.root == 0 {
+		return nil, false
+	}
+
+	rootBytes, err := tree.get(tree.root)
+	if err != nil {
+		return nil, false
+	}
+
+	bnode := BNode(rootBytes)
+
+	// Traverse internal nodes to find the target leaf node
+	for bnode.btype() != BNODE_LEAF {
+		idx := nodeLookupLE(bnode, key)
+		ptr := bnode.getPtr(idx)
+
+		nodeBytes, err := tree.get(ptr)
+		if err != nil {
+			return nil, false
+		}
+		bnode = BNode(nodeBytes)
+	}
+
+	// Find the key within the leaf node
+	idx := nodeLookupLE(bnode, key)
+	if !bytes.Equal(key, bnode.getKey(idx)) {
+		return nil, false
+	}
+
+	return bnode.getVal(idx), true
+}
+
+func (tree *BTree) Delete(key []byte) bool {
+	if tree.root == 0 {
+		return false
+	}
+
+	rootBytes, err := tree.get(tree.root)
+	if err != nil {
+		return false
+	}
+
+	updated := treeDelete(tree, BNode(rootBytes), key)
+	if len(updated) == 0 {
+		return false // key not found
+	}
+
+	// Free the old root page
+	tree.del(tree.root)
+
+	switch {
+	case updated.btype() == BNODE_NODE && updated.nkeys() == 1:
+		// Drop internal root level when it only has 1 child pointer
+		tree.root = updated.getPtr(0)
+
+	case updated.btype() == BNODE_LEAF && updated.nkeys() == 1:
+		// Only the dummy key at index 0 remains; tree is now empty
+		tree.root = 0
+
+	default:
+		// Persist the updated root node
+		ptr, err := tree.new(updated)
+		if err != nil {
+			log.Fatalf("failed to create new root: %v", err)
+		}
+		tree.root = ptr
+	}
+
+	return true
+}
+
+func treeInsert(tree *BTree, node BNode, key, val []byte) BNode {
+	new := BNode(make([]byte, 2*BTREE_PAGE_SIZE)) // CoW
+	idx := nodeLookupLE(node, key)
+	switch node.btype() {
+	case BNODE_NODE:
+		children := node.getPtr(idx)
+		childNode, err := tree.get(children)
+		if err != nil {
+			log.Fatalf("child with id = %d node not found\n", children)
+		}
+		knode := treeInsert(tree, childNode, key, val)
+		slipts, nodes := nodeSplit3(knode)
+		tree.del(children) // CoW
+		nodeReplaceChildren(tree, new, node, idx, nodes[:slipts]...)
+
+	case BNODE_LEAF:
+		if bytes.Equal(key, node.getKey(idx)) {
+			leafUpdate(new, node, idx, key, val)
+		} else {
+			leafInsert(new, node, idx+1, key, val)
+		}
+	default:
+		log.Fatalf("unknown node type %d=\n", node.btype())
+	}
+
+	return new
 }
 
 func shouldMeger(tree *BTree, node BNode, idx uint16, update BNode) (int16, BNode) {
