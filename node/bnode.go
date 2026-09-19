@@ -193,17 +193,30 @@ func leafDelete(new, old BNode, idx uint16) {
 
 func nodeLookupLE(node BNode, key []byte) uint16 {
 	nkeys := node.nkeys()
-	var i uint16
-	for i = 0; i < nkeys; i++ {
-		cmp := bytes.Compare(node.getKey(i), key)
+	if nkeys == 0 {
+		return 0
+	}
+
+	var found uint16 = 0
+	low, high := uint16(0), nkeys-1
+
+	for low <= high {
+		mid := low + (high-low)/2
+		cmp := bytes.Compare(node.getKey(mid), key)
 		if cmp == 0 {
-			return i
+			return mid
 		}
-		if cmp > 0 {
-			return i - 1
+		if cmp < 0 {
+			found = mid
+			low = mid + 1
+		} else {
+			if mid == 0 {
+				break
+			}
+			high = mid - 1
 		}
 	}
-	return i - 1
+	return found
 }
 
 func nodeSplit2(left, right, old BNode) {
