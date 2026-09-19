@@ -39,6 +39,7 @@ func New() *inMemory {
 				if pages[ptr] == nil {
 					return errors.New(fmt.Sprintf("cant delte node with ptr = %d\n", ptr))
 				}
+				delete(pages, ptr)
 				return nil
 			},
 		},
