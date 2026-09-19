@@ -13,6 +13,18 @@ type BTree struct {
 	del  func(uint64) error
 }
 
+func NewBTree(
+	get func(uint64) ([]byte, error),
+	new func([]byte) (uint64, error),
+	del func(uint64) error,
+) *BTree {
+	return &BTree{
+		get: get,
+		new: new,
+		del: del,
+	}
+}
+
 func (tree *BTree) Insert(key []byte, val []byte) error {
 	if len(key) > BTREE_MAX_KEY_SIZE || len(val) > BTREE_MAX_VAL_SIZE {
 		return errors.New("key or val too big")

@@ -108,8 +108,12 @@ func (node BNode) setOffset(idx uint16, offset uint16) {
 /*
 gets the size of the node
 */
-func (node BNode) nbytes() uint16 {
+func (node BNode) NBytes() uint16 {
 	return node.kvPos(node.nkeys())
+}
+
+func (node BNode) nbytes() uint16 {
+	return node.NBytes()
 }
 
 /*
