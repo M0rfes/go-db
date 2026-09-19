@@ -274,7 +274,11 @@ func nodeReplaceChildren(tree *BTree, new, old BNode, idx uint16, children ...BN
 	new.setHeader(BNODE_NODE, old.nkeys()+inc-1) // -1 cause its 0 indexed
 	nodeAppendRange(new, old, 0, 0, idx)
 	for i, node := range children {
-		nodeAppendKV(new, idx+uint16(i), tree.new(node), node.getKey(0), nil) // val is nil cause its an internal node and we only keep the primaery key of child node
+		ptr, err := tree.new(node)
+		if err != nil {
+			log.Fatalf("faile to make new node\n")
+		}
+		nodeAppendKV(new, idx+uint16(i), ptr, node.getKey(0), nil) // val is nil cause its an internal node and we only keep the primaery key of child node
 	}
 	nodeAppendRange(new, old, idx+inc, idx+1, old.nkeys()-(idx+1))
 }
